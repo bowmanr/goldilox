@@ -1,0 +1,476 @@
+---
+title: "FLT3_GL DEG and cell types"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = '/Users/bowmanrl/Projects/FLT3_GL/scRNA/scale_v2/')
+```
+
+```{r load in and subset seurat file,message=F,warning=F}
+library(SCPA)
+library(dplyr)
+library(msigdbr)
+library(SingleR)
+library(celldex)
+library(Seurat)
+library(ggupset)
+library(RColorBrewer)
+library(ggplot2)
+library(tidyr)
+library(cowplot)
+
+setwd("/Users/bowmanrl/Projects/FLT3_GL/scRNA/scale_v2/")
+s2_subset<-readRDS(file="./Results/")
+s2_order<-subset(s2_subset,Group%in%c("DNF","DFN"))
+s2_order<-subset(s2_order,cluster_annotations%in%c("HSPC_MLP","HSPC_MDP","HSPC_CDP","HSPC_A","HSPC_B",
+                                              "Monocytes_A","Monocytes_B","Macrophage",
+                                              "DC_11bp","DC_11bn","pDC","Neutrophil"))
+s2_order$cluster_annotations<-factor(s2_order$cluster_annotations,
+                                     levels=c("HSPC_MLP","HSPC_MDP","HSPC_CDP","HSPC_A","HSPC_B",
+                                              "Monocytes_A","Monocytes_B","Macrophage",
+                                              "DC_11bp","DC_11bn","pDC","Neutrophil"))
+
+```
+
+#Focus on order experiment
+```{r order experiment subset}
+s2_order$Group<-factor(s2_order$Group,levels=c("DNF","DFN"))
+order_UMAP_by_cluster<-DimPlot(s2_order, label = F,
+                                  group.by = "cluster_annotations",
+                                  split.by = "Group",cols = pals::kelly(n=15)[2:15])+
+                                theme(legend.position = "bottom",
+                                      legend.justification = 0.5,
+                                      legend.key.size = unit(0.1, "lines"))+
+                                guides(color = guide_legend(override.aes = list(size=1.5), 
+                                                          ncol=4))+
+                                ggtitle("")
+
+prop<-apply(as.matrix(
+                table(s2_order$Group,s2_order$cluster_annotations)),
+                    1,function(x){x/sum(x)})%>%data.frame%>%
+                tibble::rownames_to_column(var="Cell")%>%
+                pivot_longer(cols = c(DNF,DFN),names_to = "Genotype",values_to = "Proportion")%>%
+                mutate(Cell=factor(Cell,levels=rev(levels(s2_order$cluster_annotations))))%>%
+                mutate(Genotype=factor(Genotype,levels=c("DNF","DFN")))
+
+pop_bar_plot<-ggplot(prop,aes(x=Cell,y=Proportion,fill=forcats::fct_rev(Genotype)))+
+  geom_col(position = "dodge")+
+  scale_fill_manual(values=c("DNF"=brewer.pal(n=5,name="Reds")[5],
+                             "DFN"=brewer.pal(n=5,name="Blues")[5]),
+                             "Genotype")+
+  coord_flip()+
+  theme_classic(base_size=15)+
+  theme(legend.position = "bottom",
+        legend.justification = 0.5,
+        legend.key.size = unit(0.1, "lines"))+
+  guides(fill = guide_legend(reverse=T,
+                              override.aes = 
+                              list(size=2), 
+                              ncol=2))
+
+Order_cell_figure<-plot_grid(order_UMAP_by_cluster,pop_bar_plot,axis = "tb",align = "hv",rel_widths = c(1,0.8))
+
+ggsave(plot = Order_cell_figure,filename = "~/Projects/Flt3_GL/Revision/Final/Order/Order_cell_figure.pdf",
+       width = 10,height = 5)
+```
+
+```{r other cell type comparisons}
+Idents(s2_order)<-"cluster_annotations"
+
+order_Monocyte_comp<-FindMarkers(object = s2_order,
+                               ident.1 = "Monocytes_B",ident.2 = "Monocytes_A")
+order_Macro_DC_comp<-FindMarkers(object = s2_order,
+                               ident.1 = "DC_11bp",ident.2 = "Macrophage")
+order_MDP_CDP_comp<-FindMarkers(object = s2_order,
+                               ident.1 = "HSPC_MDP",ident.2 = "HSPC_CDP")
+order_B_A_comp<-FindMarkers(object = s2_order,
+                               ident.1 = "HSPC_B",ident.2 = "HSPC_A")
+order_CDP_A_comp<-FindMarkers(object = s2_order,
+                               ident.1 = "HSPC_CDP",ident.2 = "HSPC_A")
+
+
+all_markers<-FindAllMarkers(object = s2_order)
+
+all_markers%>%group_by(cluster)%>%
+                  filter(cluster=="HSPC_CDP")%>%
+                  filter(pct.1>0.6)%>%
+                  arrange(pct.2)%>%data.frame
+                  c
+                  dplyr::select(pct.1,gene,cluster)%>%data.frame
+
+```
+
+```{r DEG for order}
+Idents(s2_order)<-"cluster_annotations"
+s2_order$cluster_annotations%>%unique
+order_HSPC_A<-FindMarkers(object = s2_order,
+                               ident.1 = "DNF",ident.2 = "DFN",
+                               group.by = "Group",
+                               subset.ident = "HSPC_A")
+order_HSPC_B<-FindMarkers(object = s2_order,
+                               ident.1 = "DNF",ident.2 = "DFN",
+                               group.by = "Group",
+                               subset.ident = "HSPC_B")
+order_HSPC_MDP<-FindMarkers(object = s2_order,
+                               ident.1 = "DNF",ident.2 = "DFN",
+                               group.by = "Group",
+                               subset.ident = "HSPC_MDP")
+order_HSPC_CDP<-FindMarkers(object = s2_order,
+                               ident.1 = "DNF",ident.2 = "DFN",
+                               group.by = "Group",
+                               subset.ident = "HSPC_CDP")
+order_HSPC_MLP<-FindMarkers(object = s2_order,
+                               ident.1 = "DNF",ident.2 = "DFN",
+                               group.by = "Group",
+                               subset.ident = "HSPC_MLP")
+order_DC_11bn<-FindMarkers(object = s2_order,
+                               ident.1 = "DNF",ident.2 = "DFN",
+                               group.by = "Group",
+                               subset.ident = "DC_11bn")
+```
+
+```{r up in DNF}
+order_HSPC_A_sig_DNF<-order_HSPC_A%>%filter(p_val_adj<0.05&avg_log2FC>0)
+order_HSPC_B_sig_DNF<-order_HSPC_B%>%filter(p_val_adj<0.05&avg_log2FC>0)
+order_HSPC_MDP_sig_DNF<-order_HSPC_MDP%>%filter(p_val_adj<0.05&avg_log2FC>0)
+order_HSPC_CDP_sig_DNF<-order_HSPC_CDP%>%filter(p_val_adj<0.05&avg_log2FC>0)
+order_HSPC_MLP_sig_DNF<-order_HSPC_CDP%>%filter(p_val_adj<0.05&avg_log2FC>0)
+order_DC_11bn_sig_DNF<-order_DC_11bn%>%filter(p_val_adj<0.05&avg_log2FC>0)
+
+super_set<- Reduce(union,list(order_HSPC_A_sig_DNF%>%rownames(),
+                              order_HSPC_B_sig_DNF%>%rownames(),
+                              order_HSPC_MDP_sig_DNF%>%rownames(),
+                              order_HSPC_CDP_sig_DNF%>%rownames(),
+                              order_HSPC_MLP_sig_DNF%>%rownames(),
+                              order_DC_11bn_sig_DNF%>%rownames()
+                        ))
+
+summarized_DEG_up<-rbind(data.frame("Gene_set"=rep(x="HSPC_A",length(order_HSPC_A_sig_DNF%>%rownames())),
+                 "Gene"=order_HSPC_A_sig_DNF%>%rownames()),
+      data.frame("Gene_set"=rep(x="HSPC_B",length(order_HSPC_B_sig_DNF%>%rownames())),
+                 "Gene"=order_HSPC_B_sig_DNF%>%rownames()),
+      data.frame("Gene_set"=rep(x="HSPC_MDP",length(order_HSPC_MDP_sig_DNF%>%rownames())),
+                 "Gene"=order_HSPC_MDP_sig_DNF%>%rownames()),
+      data.frame("Gene_set"=rep(x="HSPC_CDP",length(order_HSPC_CDP_sig_DNF%>%rownames())),
+                 "Gene"=order_HSPC_CDP_sig_DNF%>%rownames()),
+      data.frame("Gene_set"=rep(x="DC_11bn",length(order_DC_11bn_sig_DNF%>%rownames())),
+                 "Gene"=order_DC_11bn_sig_DNF%>%rownames()),
+      data.frame("Gene_set"=rep(x="HSPC_MLP",length(order_HSPC_CDP_sig_DNF%>%rownames())),
+                 "Gene"=order_HSPC_CDP_sig_DNF%>%rownames()))%>%
+      group_by(Gene) %>%
+      summarize(Gene_set = list(Gene_set))%>%
+      rowwise()%>%
+      mutate(set_count=length(Gene_set))
+
+gg_DNF_up<-summarized_DEG_up%>% 
+              ggplot(aes(x = Gene_set)) +
+              geom_bar(fill=brewer.pal(n=5,name="Blues")[5]) +
+              scale_x_upset()+
+              scale_y_continuous(expand=c(0,0))+
+              xlab(" Gene Set Overlaps")+
+              ylab("\n 
+                     Gene Count")+
+              ggtitle("Upregulated Genes in Npm1 First")+
+              theme_minimal(base_size = 12)+
+                    theme(plot.title = element_text(hjust=0.5))
+
+```
+
+```{r Down in DNF}
+order_HSPC_A_sig_DFN<-order_HSPC_A%>%filter(p_val_adj<0.05&avg_log2FC<0)
+order_HSPC_B_sig_DFN<-order_HSPC_B%>%filter(p_val_adj<0.05&avg_log2FC<0)
+order_HSPC_MDP_sig_DFN<-order_HSPC_MDP%>%filter(p_val_adj<0.05&avg_log2FC<0)
+order_HSPC_CDP_sig_DFN<-order_HSPC_CDP%>%filter(p_val_adj<0.05&avg_log2FC<0)
+order_HSPC_MLP_sig_DFN<-order_HSPC_CDP%>%filter(p_val_adj<0.05&avg_log2FC<0)
+order_DC_11bn_sig_DFN<-order_DC_11bn%>%filter(p_val_adj<0.05&avg_log2FC<0)
+
+super_set<- Reduce(union,list(order_HSPC_A_sig_DFN%>%rownames(),
+                              order_HSPC_B_sig_DFN%>%rownames(),
+                              order_HSPC_MDP_sig_DFN%>%rownames(),
+                              order_HSPC_CDP_sig_DFN%>%rownames(),
+                              order_HSPC_MLP_sig_DFN%>%rownames(),
+                              order_DC_11bn_sig_DFN%>%rownames()
+                              ))
+
+summarized_DEG_down<-rbind(data.frame("Gene_set"=rep(x="HSPC_A",length(order_HSPC_A_sig_DFN%>%rownames())),
+                 "Gene"=order_HSPC_A_sig_DFN%>%rownames()),
+      data.frame("Gene_set"=rep(x="HSPC_B",length(order_HSPC_B_sig_DFN%>%rownames())),
+                 "Gene"=order_HSPC_B_sig_DFN%>%rownames()),
+      data.frame("Gene_set"=rep(x="HSPC_MDP",length(order_HSPC_MDP_sig_DFN%>%rownames())),
+                 "Gene"=order_HSPC_MDP_sig_DFN%>%rownames()),
+      data.frame("Gene_set"=rep(x="HSPC_CDP",length(order_HSPC_CDP_sig_DFN%>%rownames())),
+                 "Gene"=order_HSPC_CDP_sig_DFN%>%rownames()),
+      data.frame("Gene_set"=rep(x="DC_11bn",length(order_DC_11bn_sig_DFN%>%rownames())),
+                 "Gene"=order_DC_11bn_sig_DFN%>%rownames()),
+      data.frame("Gene_set"=rep(x="HSPC_MLP",length(order_HSPC_CDP_sig_DFN%>%rownames())),
+                 "Gene"=order_HSPC_CDP_sig_DFN%>%rownames()))%>%
+      group_by(Gene) %>%
+      summarize(Gene_set = list(Gene_set))%>%
+      rowwise()%>%
+      mutate(set_count=length(Gene_set))
+
+gg_DFN_up<-summarized_DEG_down%>% 
+              ggplot(aes(x = Gene_set)) +
+              geom_bar(fill=brewer.pal(n=5,name="Reds")[5]) +
+              scale_x_upset()+
+              scale_y_continuous(expand=c(0,0))+
+              xlab(" Gene Set Overlaps")+
+              ylab("\n 
+                     Gene Count")+
+              ggtitle("Upregulated Genes in Flt3 First")+
+              theme_minimal(base_size = 12)+
+                    theme(plot.title = element_text(hjust=0.5))
+
+
+```
+
+```{r gene selection}
+summarized_DEG_up%>%
+      filter(set_count>=2&any(grepl("HSPC_CDP",Gene_set)))%>%
+        pull(Gene)%>%sort
+
+summarized_DEG_up%>%
+      filter(set_count==1&any(grepl("HSPC_MDP",Gene_set)))%>%
+        pull(Gene)%>%sort
+
+summarized_DEG_up%>%
+      filter(set_count>1&any(grepl("HSPC_CDP",Gene_set)))%>%
+        pull(Gene)%>%sort
+
+```
+
+```{r dot plot on population level marker genes}
+s2_order$cluster_annotations<- factor(s2_order$cluster_annotations,levels=rev(levels(s2_order$cluster_annotations)))
+Idents(s2_order)<-"cluster_annotations"
+
+final_genes<- c("Flt3","Kit","Mecom","Meis1","Hoxa9","Mpo","Ms4a3","Elane","Runx1","Cd48","Bach2","Irf8",
+                "Ly6e","Ly6c2",
+                "Cebpa","Cebpb","Spi1",
+                "Cx3cr1","Csf1r","Itgam","Mrc1","Cd74","Itgax","Siglech","S100a9","Ly6g")
+
+
+dot_plot<-DotPlot(object = s2_order,features = final_genes,scale = T,scale.by = "size",
+                          idents = rev(levels(s2_order$cluster_annotations)),
+                          assay = "SCT",
+                          group.by ="cluster_annotations",
+                          cols ="RdBu" )+RotatedAxis()
+
+ggsave(plot = dot_plot,
+       filename = "~/Projects/Flt3_GL/Revision/Final/Order/Order_cell_marker_genes.pdf",
+       width = 9,height = 4.5)
+```
+
+```{r dotplot on genes of interest}
+cell_list<- c("HSPC_CDP","HSPC_MDP","HSPC_A","HSPC_B","HSPC_MLP","DC_11bn")
+Idents(s2_order)<-"cluster_annotations"
+
+final_genes<- c("Irf7","Irf8","Irf9","Zeb2","Csf2ra","Ly6e","Ly6a",
+                "Fgfr1","Lifr","Hoxb4","Ly6c2","Ciita","Itgax","Cd74",
+                "Cdk6","Il1r1","Flt3","Ly86","Cebpd","Oas1a","Irf1")
+
+final_genes<- c("Mki67","Cdk6","Cdkn1a","Ccnd2",
+                "Mx1","Ly6e","Irf8","Irf9","Ifnar1","Hck",
+                "Cd34","Hoxb4","Hoxa9","Hoxa10",
+                "Csf1r","Csf2ra","Csf3r",
+                "Flt3","Igf1r","Fgfr1","Lifr")
+
+dot_plot<-DotPlot(object = s2_order,
+                          features = final_genes,
+                          scale = T,scale.by = "size",
+                          assay = "RNA",
+                          idents = cell_list,
+                          group.by ="cluster_annotations",
+                          split.by  = "Group",
+                          cols ="RdBu" )+RotatedAxis()
+
+ggsave(plot = dot_plot+
+               geom_hline(yintercept = c(2.5,4.5,6.5,8.5,10.5),
+                 lty=2),
+       filename = "~/Projects/Flt3_GL/Revision/Final/Order/Order_DEGs_dotplot.pdf",
+       width = 9,height = 4.5)
+
+```
+
+```{r add hallmark module scores,warning=FALSE}
+pathways <- msigdbr::msigdbr(species = "Mus musculus", category = "H") 
+geneSet_list<-split(pathways$gene_symbol,f = pathways$gs_name)
+s2_order <- AddModuleScore(object = s2_order, 
+                           features = geneSet_list , 
+                           name = names(geneSet_list))
+hallmark_final_pathways<- pathways%>%format_pathways()
+```
+ 
+```{r add external pathway module scores,warning=FALSE}
+gene_sets<- list.files("~/Projects/FLT3_GL/scRNA/scale_v2/data",full.names = TRUE,recursive = T)
+
+pathways_FLT3<-lapply(gene_sets,function(x){
+  list_name<-gsub(".csv","",do.call(rbind,strsplit(x,split="/"))[,9])
+    read.csv(x)%>%
+    select( Genes = 2, everything() )%>%
+    mutate(Pathway=list_name)%>%
+                dplyr::select(Pathway,Genes)%>%
+                tibble::as_tibble()
+})
+FLT3_list<-split(do.call(rbind,pathways_FLT3)$Genes,do.call(rbind,pathways_FLT3)$Pathway)
+
+s2_order <- AddModuleScore(object = s2_order, 
+                           features = FLT3_list , 
+                           name = names(FLT3_list))
+```
+
+```{r SCPA,message=FALSE}
+pathways_c2 <- msigdbr::msigdbr(species = "Mus musculus", category = "C2") %>%
+            filter(grepl("KEGG|REACTOME",gs_subcat))%>%
+            format_pathways()
+hallmark_final_pathways<- pathways%>%format_pathways()
+
+
+order_results<-list()
+cell_list<- c("HSPC_CDP","HSPC_MDP","HSPC_A","HSPC_B","HSPC_MLP")
+sample_list<- c("DNF","DFN")
+for(sample in sample_list){
+order_results[[sample]]<-do.call(cbind,lapply(cell_list,function(cell){
+        seurat_extract(s2_order, assay = "SCT",
+                        meta1 = "Group", value_meta1 = sample,
+                        meta2="cluster_annotations",  value_meta2 = cell
+                          )}))} 
+order_scpa_FLT3 <- compare_pathways(samples = order_results,   downsample = 900,
+                                        pathways = pathways_FLT3,
+                                        parallel = TRUE,
+                                        cores = 16)
+order_scpa_Hallmark <- compare_pathways(samples = order_results, downsample = 900,
+                                        pathways = hallmark_final_pathways,
+                                        parallel = TRUE,
+                                        cores = 16)
+order_scpa_C2 <- compare_pathways(samples = order_results, downsample = 900,
+                                        pathways = pathways_c2,
+                                        parallel = TRUE,
+                                        cores = 16)
+
+final_SCPA<-do.call(rbind, list(order_scpa_FLT3,order_scpa_Hallmark,order_scpa_C2))
+```
+
+```{r plotting SCPA results}
+SCPA_scores<-final_SCPA%>%
+    filter(Pathway%in%c("immediate_LSK_up","delayed_LSK_up",
+                        "HALLMARK_INTERFERON_GAMMA_RESPONSE",
+                        "HALLMARK_INFLAMMATORY_RESPONSE",
+                        "REACTOME_MAPK_FAMILY_SIGNALING_CASCADES",
+                        "HALLMARK_MTORC1_SIGNALING",
+                        "REACTOME_PI3K_AKT_SIGNALING_IN_CANCER"))%>%
+    mutate(score=-log10(adjPval)*sign(FC))%>%
+    mutate(Group=factor(ifelse(score>0,"DNF","DFN"),levels=c("DNF","DFN")))%>%
+    arrange(score)%>%
+    mutate(Pathway=factor(Pathway,levels=Pathway))%>%
+    ggplot(aes(x=Pathway,y=score,fill=forcats::fct_rev(Group)))+
+            geom_col(position = "dodge")+
+            scale_fill_manual(values=c("DNF"=brewer.pal(n=5,name="Reds")[5],
+                                      "DFN"=brewer.pal(n=5,name="Blues")[5]),
+                               "Enrichment")+
+            coord_flip()+
+            theme_classic(base_size=15)+
+            theme(legend.position = "right",
+                  legend.justification = 0.5,
+                  legend.key.size = unit(0.1, "lines"))+
+            guides(fill = guide_legend(reverse=T,
+                                        override.aes = 
+                                        list(size=2), 
+                                        ncol=1))
+
+ggsave(plot = SCPA_scores,
+       filename = "~/Projects/Flt3_GL/Revision/Final/Order/SCPA_scores.pdf",
+       width = 8,height =2)
+```
+
+```{r}
+FeaturePlot(s2_order, features = c("Ly6e",
+                                   "Mecom",
+                                   "Procr"),
+                       #   keep.scale="feature",
+                      #    cols = c("grey80",brewer.pal(n=5,name="Reds")[5]),
+                          reduction = "umap",ncol = 3)+
+                   theme(legend.position = c(1,0.9),legend.key.size = unit(0.25,"cm"))&
+            colorspace::scale_color_continuous_divergingx(palette = 'Spectral', 
+                                                          mid = 0,
+                                                          rev=TRUE,
+                                                          na.value = "grey80")
+
+
+```
+
+```{r plotting module scores}
+FeaturePlot(s2_order, features = c("immediate_LSK_up6",
+                                   "delayed_LSK_up2"),
+                          keep.scale="feature",
+                      #    cols = c("grey80",brewer.pal(n=5,name="Reds")[5]),
+                          split.by = "Group",
+                          reduction = "umap")+
+                   theme(legend.position = c(1,0.9),legend.key.size = unit(0.25,"cm"))&
+            colorspace::scale_color_continuous_divergingx(palette = 'Spectral', 
+                                                          mid = 0,
+                                                          rev=TRUE,
+                                                          na.value = "grey80")
+
+
+dot_plot_modules<-DotPlot(object = s2_order,
+                          features = c("immediate_LSK_up6","sustained_LSK_up10",
+                                   "delayed_LSK_up2"),
+                          scale = T,scale.by = "size",
+                          assay = "RNA",
+                          idents = cell_list,
+                          group.by ="cluster_annotations",
+                          split.by  = "Group",
+                          cols ="RdBu" )+RotatedAxis()
+
+```
+
+```{r ridgeplots}
+Idents(s2_order)<-c("cluster_annotations")
+ridgePlot_out<-Seurat::RidgePlot(object = s2_order,idents = c("HSPC_CDP"),
+                  features = c("Flt3","immediate_LSK_up6"),
+                  group.by  = "Group",ncol = 2)&
+                  scale_fill_manual(values=c("DNF"=brewer.pal(n=5,name="Reds")[5],
+                             "DFN"=brewer.pal(n=5,name="Blues")[5]),
+                             "Genotype")
+
+ggsave(plot = ridgePlot_out,
+       filename = "~/Projects/Flt3_GL/Revision/Final/Order/ridgePlot_out.pdf",
+       width = 6,height =2.5)
+```
+
+```{r}
+DNF_up_subset<-summarized_DEG_up%>%
+    filter(Gene%in%pathways_FLT3[[6]]$Genes|
+           Gene%in%pathways_FLT3[[10]]$Genes|
+           Gene%in%pathways_FLT3[[2]]$Genes
+             )%>%
+    pull(Gene)
+```
+
+```{r plotting gene heatmap}
+library(dittoSeq)
+ident_of_interest<- grep("HSPC",Idents(s2_order),value=T)%>%unique
+ident_of_interest_subset<-subset(s2_order,idents =ident_of_interest )
+
+genes_of_interest<- c("Flt3",DNF_up_subset)
+
+cells_of_interest<-ident_of_interest_subset@meta.data%>%rownames
+
+out<-dittoHeatmap(ident_of_interest_subset, 
+                # heatmap.colors.max.scaled = pals::coolwarm(n=100),
+                 # slot = "data",
+                #  scaled.to.max= F,
+             intersect(rownames(ident_of_interest_subset),DNF_up_subset),
+    order.by = c("cluster_annotations","Group"),
+    annot.by  = c("Group","cluster_annotations"))
+out
+```
+
+
+
+
+
+

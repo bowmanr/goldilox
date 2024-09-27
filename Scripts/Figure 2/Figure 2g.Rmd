@@ -1,0 +1,104 @@
+---
+title: "Clonal Evolution Figure 2g"
+author: "Robert Bowman"
+date: "5/12/2022"
+output: html_document
+---
+
+
+Setup and Packages
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Volumes/LevineLab/Levine Lab/Bobby/Project Notes/Flt3/")
+```
+
+Data Sets
+```{r, message=FALSE}
+library(tidyverse)
+library(cowplot)
+library(RColorBrewer)
+library(pals)
+setwd("/Volumes/LevineLab/Levine Lab/Bobby/Project Notes/Flt3/")
+source("./Scripts/extra_functions.R")
+
+results<-readRDS("./Results/2022/May/NF_vs_DF_STAR_results.rds")
+pheno_select<-readRDS(file="./Results/2022/May/NF_vs_DF_STAR_pheno.rds")
+norm_counts<-readRDS(file="./Results/2022/May/NF_vs_DF_STAR_norm_counts.rds")
+long_counts<-readRDS(file="./Results/2022/May/NF_vs_DF_STAR_long_counts.rds")
+vsd_transformation<-readRDS(file="./Results/2022/May/NF_vs_DF_STAR_vsd.rds")
+```
+
+```{r}
+write.csv(results$LSK_Flt3_Npm1$LSK_Flt3_Npm1_VS_LSK_Flt3_Dnmt3a%>%
+                        data.frame%>%
+                        rownames_to_column(var="Gene"),row.names=FALSE,
+        file="./Mature_analysis/Statistics/TableS1c.csv")
+```
+
+Gene lists
+```{r}
+immediate_response_GMP<-read.csv(file="./Results/2022/February/immediate_response_GMP_genes.csv")[,-1]
+sustained_response_GMP<-read.csv(file="./Results/2022/February/sustained_response_GMP_genes.csv")[,-1]
+delayed_response_GMP<-read.csv(file="./Results/2022/February/delayed_response_GMP_genes.csv")[,-1]
+
+immediate_response_LSK<-read.csv(file="./Results/2022/February/immediate_response_LSK_genes.csv")[,-1]
+sustained_response_LSK<-read.csv(file="./Results/2022/February/sustained_response_LSK_genes.csv")[,-1]
+delayed_response_LSK<-read.csv(file="./Results/2022/February/delayed_response_LSK_genes.csv")[,-1]
+cutoff<- -log10(0.01)
+immediate_LSK_up<-immediate_response_LSK%>%dplyr::filter(Flt3_2w_LSK>cutoff)%>%pull(Genes)
+sustained_LSK_up<-sustained_response_LSK%>%dplyr::filter(Flt3_8w_LSK>cutoff)%>%pull(Genes)
+delayed_LSK_up<-delayed_response_LSK%>%dplyr::filter(Flt3_4w_LSK>cutoff)%>%pull(Genes)
+
+immediate_GMP_up<-immediate_response_GMP%>%dplyr::filter(Flt3_2w_GMP>cutoff)%>%pull(Genes)
+sustained_GMP_up<-sustained_response_GMP%>%dplyr::filter(Flt3_8w_GMP>cutoff)%>%pull(Genes)
+delayed_GMP_up<-delayed_response_GMP%>%dplyr::filter(Flt3_4w_GMP>cutoff)%>%pull(Genes)
+
+immediate_LSK_down<-immediate_response_LSK%>%dplyr::filter(Flt3_2w_LSK<(-cutoff))%>%pull(Genes)
+sustained_LSK_down<-sustained_response_LSK%>%dplyr::filter(Flt3_8w_LSK<(-cutoff))%>%pull(Genes)
+delayed_LSK_down<-delayed_response_LSK%>%dplyr::filter(Flt3_4w_LSK<(-cutoff))%>%pull(Genes)
+
+immediate_GMP_down<-immediate_response_GMP%>%dplyr::filter(Flt3_2w_GMP<(-cutoff))%>%pull(Genes)
+sustained_GMP_down<-sustained_response_GMP%>%dplyr::filter(Flt3_8w_GMP<(-cutoff))%>%pull(Genes)
+delayed_GMP_down<-delayed_response_GMP%>%dplyr::filter(Flt3_4w_GMP<(-cutoff))%>%pull(Genes)
+
+gene_sets<-list("immediate_LSK_up"=immediate_LSK_up,
+     "sustained_LSK_up"=sustained_LSK_up,
+     "delayed_LSK_up"=delayed_LSK_up,
+     "immediate_LSK_down"=immediate_LSK_down,
+     "sustained_LSK_down"=sustained_LSK_down,
+     "delayed_LSK_down"=delayed_LSK_down,
+     "immediate_GMP_up"=immediate_GMP_up,
+     "sustained_GMP_up"=sustained_GMP_up,
+     "delayed_GMP_up"=delayed_GMP_up,
+     "immediate_GMP_down"=immediate_GMP_down,
+     "sustained_GMP_down"=sustained_GMP_down,
+     "delayed_GMP_down"=delayed_GMP_down)
+```
+
+```{r}
+lapply(names(gene_sets),function(x){
+        write.csv(gene_sets[x],
+                  file=paste0("./Mature_analysis/Statistics/",x,".csv"))
+})
+```
+
+Figure 2g
+```{r gsva}
+vsd_scale<- (assay(vsd_transformation)-rowMeans(assay(vsd_transformation)))/rowSds(assay(vsd_transformation))
+gsva_results_DF_NF<-gsva(vsd_scale,
+                          gene_sets,
+                          min.sz=10, max.sz=5000,
+                          method="ssgsea",
+                         # rnaseq=TRUE, 
+                          verbose=TRUE)%>%
+                      data.frame()%>%
+                      rownames_to_column(var="Gene_set")%>%
+                      pivot_longer(cols=starts_with("Sample"),names_to="samples.1",values_to="value")%>%
+                      left_join(pheno_select,by="samples.1")
+
+gsva_results_DF_NF%>%
+        arrange(Cell.type,Gene_set,Genotype)%>%
+        dplyr::select(Cell.type,Gene_set,Genotype,value)%>%
+        write.csv("./Results/2022/May/ssGSEA_NF_DF_results.csv")
+```
+

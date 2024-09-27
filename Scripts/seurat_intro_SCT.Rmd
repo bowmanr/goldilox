@@ -1,0 +1,197 @@
+---
+title: "GoldiLox Scale scRNAseq"
+output: html_document
+date: "2024-01-05"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = '/Users/bowmanrl/Projects/FLT3_GL/scale_v2/')
+```
+
+
+```{r,packages}
+library(Seurat)
+library(ggplot2)
+library(sctransform)
+library(dplyr)
+```
+
+```{r, create seurat object}
+
+A<- Seurat::ReadSTARsolo(data.dir = "./Results/samples/A.filtered/")
+B<- Seurat::ReadSTARsolo(data.dir = "./Results/samples/B.filtered/")
+C<- Seurat::ReadSTARsolo(data.dir = "./Results/samples/C.filtered/")
+D<- Seurat::ReadSTARsolo(data.dir = "./Results/samples/D.filtered/")
+E<- Seurat::ReadSTARsolo(data.dir = "./Results/samples/E.filtered/")
+F<- Seurat::ReadSTARsolo(data.dir = "./Results/samples/F.filtered/")
+G<- Seurat::ReadSTARsolo(data.dir = "./Results/samples/G.filtered/")
+H<- Seurat::ReadSTARsolo(data.dir = "./Results/samples/H.filtered/")
+I<- Seurat::ReadSTARsolo(data.dir = "./Results/samples/I.filtered/")
+J<- Seurat::ReadSTARsolo(data.dir = "./Results/samples/J.filtered/")
+K<- Seurat::ReadSTARsolo(data.dir = "./Results/samples/K.filtered/")
+L<- Seurat::ReadSTARsolo(data.dir = "./Results/samples/L.filtered/")
+
+sample_list<-list()
+sample_list<- list(A,B,C,D,E,F,G,H,I,J,K,L)
+names(sample_list)<- LETTERS[1:length(sample_list)]
+
+all_samples<-do.call(cbind,sample_list)
+
+cell_counts<-do.call(c,lapply(1:length(sample_list),function(x){
+              rep(names(sample_list)[x],ncol(sample_list[[x]]))
+}))
+
+mouse<-c("BXY3_423","BXY3_427","BXY3_428","BXY3_431","CE_542","CE_552",
+         "CAH5_531","CAH5_534",
+         "CAH5_535","CAH5_537","CAH5_538",
+         "CAH5_539")
+
+sample_name <- do.call(c,lapply(1:length(sample_list),function(x){
+  rep(mouse[x],ncol(sample_list[[x]]))
+}))
+
+group<-c("GL_Vehicle","GL_Gilt","GL_Gilt","GL_Gilt","DFN","DNF",
+         "GL_TAM","GL_TAM",
+         "GL_TAM","GL_Vehicle","GL_Vehicle",
+         "GL_Vehicle")
+
+
+sample_group <- do.call(c,lapply(1:length(sample_list),function(x){
+  rep(group[x],ncol(sample_list[[x]]))
+}))
+
+s <-all_samples%>%Seurat::CreateSeuratObject(assay="RNA")
+s <-Seurat::AddMetaData(object =s,
+                        metadata =list("Sample"=cell_counts,
+                                       "Sample_names"=sample_name,
+                                       "Group"=sample_group))
+```
+
+
+```{r, QC seuart}
+s[["percent.mt"]] <- PercentageFeatureSet(s, pattern = "^mt-")
+s[["Xist"]] <- PercentageFeatureSet(s, pattern = "Xist")
+
+plot1 <- FeatureScatter(s, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(s, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot3 <- VlnPlot(s, features = c("nFeature_RNA", "nCount_RNA", "percent.mt","Xist"), ncol = 4)
+
+(plot1 + plot2)/plot3
+```
+
+```{r, cell cycle ID}
+library(nichenetr)
+g2m.genes <- nichenetr::convert_human_to_mouse_symbols(symbols=c(cc.genes$g2m.genes))       
+s.genes <- nichenetr::convert_human_to_mouse_symbols(symbols=c(cc.genes$s.genes))     
+
+s <- NormalizeData(s)
+s <- CellCycleScoring(s, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+```
+
+```{r, subet seurat}
+s2 <- subset(s, subset = nFeature_RNA > 1000 & percent.mt < 2)
+```
+
+
+```{r, sctransform}
+s2 <- SCTransform(s2, vars.to.regress = c("percent.mt","Xist","S.Score","G2M.Score"),variable.features.n = 8000, verbose = TRUE,min_cells=25)
+
+s2 <- CellCycleScoring(s2, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+```
+
+```{r, dim reduction and clustering}
+s2 <- RunPCA(s2, verbose = FALSE)
+s2 <- RunUMAP(s2, dims = 1:30, verbose = FALSE)
+
+s2 <- FindNeighbors(s2, dims = 1:30, verbose = FALSE)
+s2 <- FindClusters(s2, verbose = FALSE,resolution = 0.5)
+DimPlot(s2, label = TRUE)
+DimPlot(s2, label = TRUE,group.by = "seurat_clusters",split.by = "Group")
+```
+
+```{r}
+FeaturePlot(s2, reduction = "umap",features ="Irf8",split.by = "Group")
+
+```
+
+```{r, find cluster markers}
+
+Idents(s2)<-"seurat_clusters"
+cluster_markers<-FindAllMarkers(s2)
+cluster_markers%>%data.frame()%>%
+             group_by(cluster)%>%
+             filter(cluster%in%c(7,10))%>%
+           # filter(grepl("Tcrg",gene))%>%
+         #   filter(pct.1>0.3)%>%
+             slice(1:45)%>%
+             data.frame
+```
+
+```{r}
+Idents(s2)<-"seurat_clusters"
+FindMarkers(s2,ident.1 = "DNF",ident.2 = "GL_Vehicle",group.by = "Group",subset.ident = "0")
+
+Idents(s2)<-"seurat_clusters"
+FindMarkers(s2,ident.1 = "5",ident.2 = "10")
+
+```
+
+```{r}
+library(pheatmap)
+pheatmap(table(s2$seurat_clusters,s2$Group)/colSums(table(s2$seurat_clusters,s2$Group)),scale="row")
+
+```
+
+```{r}
+library(nichenetr)
+g2m.genes <- nichenetr::convert_human_to_mouse_symbols(symbols=c(cc.genes$g2m.genes))       
+s.genes <- nichenetr::convert_human_to_mouse_symbols(symbols=c(cc.genes$s.genes))       
+s2 <- CellCycleScoring(s2, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+data.frame(s@meta.data)%>%
+      ggplot(aes(x=Group,fill=Phase))+
+      geom_bar(position = "fill")+facet_wrap(~seurat_clusters)
+
+```
+
+```{r}
+saveRDS(s2,file = "~/Projects/FLT3_GL/scale_v2/Results/scale_complete_seurat_SCT.rds")
+```
+
+```{r}
+
+library(SCPA)
+library(dplyr)
+library(msigdbr)
+pathways <- msigdbr::msigdbr(species = "Mus musculus", category = "H") %>%
+#  filter(grepl("FLT3|GILT|QUIZ|LEUKEM|MYELOID|AML|STAT5",gs_name))%>%
+  format_pathways()
+ 
+gilt_tam<-list()
+gilt_tam$DNF <- seurat_extract(s2,
+                                     assay = "SCT",
+                                     meta1 = "Group",
+                                     value_meta1 = "DNF",
+                                    meta2="seurat_clusters",
+                                    value_meta2 = "0"
+                                      )
+gilt_tam$DF<-seurat_extract(s2,
+                                assay = "SCT",
+                                meta1 = "Group",
+                                value_meta1 = "DFN",
+                               meta2="seurat_clusters",
+                               value_meta2 = "0"
+)
+
+gilt_tam_scpa <- compare_pathways(samples = gilt_tam, 
+                                        pathways = pathways,
+                                        parallel = TRUE,
+                                        cores = 8)
+
+gilt_tam_scpa
+
+
+s2@meta.data%>%data.frame%>%
+      ggplot(aes(x=Group,fill=seurat_clusters))+geom_bar()
+```
