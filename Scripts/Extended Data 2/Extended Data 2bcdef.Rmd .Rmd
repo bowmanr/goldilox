@@ -1,0 +1,275 @@
+---
+title: "Clonal Evolution: Extended Data 2"
+author: "Robert Bowman"
+date: "5/12/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Volumes/LevineLab/Levine Lab/Bobby/Project Notes/Flt3/")
+```
+
+```{r, message=FALSE}
+library(tidyverse)
+library(cowplot)
+library(RColorBrewer)
+library(pals)
+setwd("/Volumes/LevineLab/Levine Lab/Bobby/Project Notes/Flt3/")
+source("./Scripts/extra_functions.R")
+results_Leuk<-readRDS(file="./Results/2022/February/Flt3_Npm1_3DE_STAR_results.rds")
+pheno_select_leuk<-readRDS(file="./Results/2022/February/Flt3_NPM1_3DE_STAR_pheno.rds")
+norm_counts_leuk<-readRDS(file="./Results/2022/February/Flt3_NPM1_3DE_STAR_norm_counts.rds")
+long_counts_leuk<-readRDS(file="./Results/2022/February/Flt3_NPM1_3DE_STAR_long_counts.rds")
+vsd_transformation_leuk<-readRDS(file="./Results/2022/February/Flt3_NPM1_3DE_STAR_vsd.rds")
+
+results_FTime<-readRDS(file="./Results/2022/February/Flt3_3DE_STAR_results.rds")
+pheno_FTime<-readRDS(file="./Results/2022/February/Flt3_3DE_STAR_pheno.rds")
+norm_counts_FTime<-readRDS(file="./Results/2022/February/Flt3_3DE_STAR_norm_counts.rds")
+long_counts_FTime<-readRDS(file="./Results/2022/February/Flt3_3DE_STAR_long_counts.rds")
+vsd_transformation_FTime<-readRDS(file="./Results/2022/February/Flt3_3DE_STAR_vsd.rds")
+```
+
+Gene lists
+```{r}
+immediate_response_GMP<-read.csv(file="./Results/2022/February/immediate_response_GMP_genes.csv")[,-1]
+sustained_response_GMP<-read.csv(file="./Results/2022/February/sustained_response_GMP_genes.csv")[,-1]
+delayed_response_GMP<-read.csv(file="./Results/2022/February/delayed_response_GMP_genes.csv")[,-1]
+
+immediate_response_LSK<-read.csv(file="./Results/2022/February/immediate_response_LSK_genes.csv")[,-1]
+sustained_response_LSK<-read.csv(file="./Results/2022/February/sustained_response_LSK_genes.csv")[,-1]
+delayed_response_LSK<-read.csv(file="./Results/2022/February/delayed_response_LSK_genes.csv")[,-1]
+```
+
+Extended Data 2A
+```{r}
+PCA<-plotPCA(vsd_transformation_FTime,
+                            intgroup="Composite",
+                            ntop=1000,
+                            return=TRUE)
+
+ggPCA<-ggplot(PCA%>%
+                inner_join(pheno_FTime%>%dplyr::select(Sample,Cell),by=c("name"="Sample")),
+               aes(x=PC1,y=PC2,color=Composite,shape=Cell))+
+  geom_point(size=3)+
+  theme_minimal(base_size = 8)+
+  theme(axis.line.x = element_line(),
+        axis.line.y = element_line())+
+  scale_color_manual(values=c(pals::kelly()[-1]))
+
+ggsave(addSmallLegend(ggPCA,textSize = 8),
+      width=3,
+      height=2.25,
+  file="./Mature_analysis/Final_Figures/Extended Data 2/ExData_2a-PCA.pdf")
+```
+
+Extended Data 2B,C
+```{r message=FALSE}
+cutoff<- -log10(0.01)
+immediate_LSK_up<-immediate_response_LSK%>%dplyr::filter(Flt3_2w_LSK>cutoff)%>%pull(Genes)
+sustained_LSK_up<-sustained_response_LSK%>%dplyr::filter(Flt3_8w_LSK>cutoff)%>%pull(Genes)
+delayed_LSK_up<-delayed_response_LSK%>%dplyr::filter(Flt3_4w_LSK>cutoff)%>%pull(Genes)
+
+immediate_GMP_up<-immediate_response_GMP%>%dplyr::filter(Flt3_2w_GMP>cutoff)%>%pull(Genes)
+sustained_GMP_up<-sustained_response_GMP%>%dplyr::filter(Flt3_8w_GMP>cutoff)%>%pull(Genes)
+delayed_GMP_up<-delayed_response_GMP%>%dplyr::filter(Flt3_4w_GMP>cutoff)%>%pull(Genes)
+
+immediate_LSK_down<-immediate_response_LSK%>%dplyr::filter(Flt3_2w_LSK<(-cutoff))%>%pull(Genes)
+sustained_LSK_down<-sustained_response_LSK%>%dplyr::filter(Flt3_8w_LSK<(-cutoff))%>%pull(Genes)
+delayed_LSK_down<-delayed_response_LSK%>%dplyr::filter(Flt3_4w_LSK<(-cutoff))%>%pull(Genes)
+
+immediate_GMP_down<-immediate_response_GMP%>%dplyr::filter(Flt3_2w_GMP<(-cutoff))%>%pull(Genes)
+sustained_GMP_down<-sustained_response_GMP%>%dplyr::filter(Flt3_8w_GMP<(-cutoff))%>%pull(Genes)
+delayed_GMP_down<-delayed_response_GMP%>%dplyr::filter(Flt3_4w_GMP<(-cutoff))%>%pull(Genes)
+
+
+gg_LSK_timecourse_input<-long_counts_FTime%>%
+    dplyr::filter(Cell=="LSK")%>%
+    group_by(Gene,Composite)%>%
+    summarize(value_mean=log2(mean(value+1)))%>%
+    ungroup()%>%
+    group_by(Gene)%>%
+    mutate(value_mean_fc=value_mean-value_mean[Composite=="WT_4w"])  %>%
+    ungroup()%>%
+    mutate(Gene_group=ifelse(Gene%in%immediate_LSK_up,"Transient Up",
+                      ifelse(Gene%in%sustained_LSK_up,"Sustained Up", 
+                      ifelse(Gene%in%delayed_LSK_up,"Delayed Up",
+                                    ifelse(Gene%in%immediate_LSK_down,"Transient Down",
+                                    ifelse(Gene%in%sustained_LSK_down,"Sustained Down", 
+                                    ifelse(Gene%in%delayed_LSK_down,"Delayed Down", 
+                                           "Other")))))))%>%
+    mutate(Gene_group=factor(Gene_group,levels=c("Sustained Up","Delayed Up","Transient Up",
+                                                 "Sustained Down","Delayed Down","Transient Down")))%>%
+    mutate(Comp_continuous=ifelse(Composite=="WT_4w",0,
+                                 ifelse(Composite=="Flt3_2w",2, 
+                                        ifelse(Composite=="Flt3_4w",4, 
+                                               ifelse(Composite=="Flt3_6w",6, 
+                                                      ifelse(Composite=="Flt3_8w",8, NA))))))%>%
+    dplyr::filter(Gene_group!="Other")
+
+
+gg_LSK_timecourse<-gg_LSK_timecourse_input%>%
+                  ggplot(aes(x=Comp_continuous,y=value_mean_fc,color=Gene_group,group=Gene))+
+                  rasterize(geom_line(alpha=0.05,lwd=0.25))+
+                  stat_summary(fun=mean,lty=5,lwd=0.75, geom="line",aes(group = Gene_group))+
+                  scale_y_continuous(limits = c(-7.5,7.5))+
+                  scale_color_manual(values=c("Sustained Up"=stepped()[9],
+                                              "Delayed Up"=stepped()[17],
+                                              "Transient Up"=stepped()[1],
+                                              "Sustained Down"=stepped()[13],
+                                              "Delayed Down"=stepped()[5],
+                                              "Transient Down"=stepped3()[5]))+
+                    ylab("Log2 Fold Change from WT")+
+                    xlab("Weeks post TAM")+
+                              theme_classic(base_size=8)
+
+gg_timecourse_barplot<-gg_LSK_timecourse_input%>%
+                        distinct(Gene,Gene_group)%>%
+                  ggplot(aes(y=Gene_group,fill=Gene_group))+
+                  geom_bar(stat="count")+
+                  scale_y_discrete(limits = rev(levels(all_of(gg_LSK_timecourse_input$Gene_group))),
+                                   breaks= rev(levels(all_of(gg_LSK_timecourse_input$Gene_group))),
+                                   labels= rev(c("Sustained \n Up",
+                                             "Delayed \n Up",
+                                             "Transient \n Up",
+                                            "Sustained \n Down",
+                                             "Delayed \n Down",
+                                             "Transient \n Down" )))+
+                  scale_fill_manual(values=c("Sustained Up"=stepped()[9],
+                                              "Delayed Up"=stepped()[17],
+                                              "Transient Up"=stepped()[1],
+                                              "Sustained Down"=stepped()[13],
+                                              "Delayed Down"=stepped()[5],
+                                              "Transient Down"=stepped3()[5]))+
+                  guides(fill="none")+
+                  ylab("Gene Group")+
+                  xlab("# of Genes")+
+                              theme_classic(base_size=8)
+
+ggsave(
+  plot_grid(gg_timecourse_barplot,addSmallLegend(gg_LSK_timecourse,textSize = 8),rel_widths = c(0.6,1)),
+  width=5,height=2.25,
+  file="./Mature_analysis/Final_Figures/Extended Data 2/ExData_2bc_transient.pdf")
+```
+
+
+Extended Data 2D,F
+```{r}
+genes_of_interest<- c("Tal1","Meis1","Mecom","Hoxa9","Hoxb5")
+
+ggstem_FTime<-ggplot(long_counts_FTime%>%
+          filter(Gene%in%genes_of_interest)%>%
+          filter(Cell=="LSK")%>%
+          mutate(Gene=factor(Gene,levels=genes_of_interest)),
+          aes(x=factor(interaction(Genotype,Timepoint),
+                       levels=c("WT.4w","Flt3.2w","Flt3.4w","Flt3.6w","Flt3.8w")),
+             fill=factor(interaction(Genotype,Timepoint),
+                       levels=c("WT.4w","Flt3.2w","Flt3.4w","Flt3.6w","Flt3.8w")),
+            y=value))+
+            stat_summary(fun= median, geom = "crossbar", width = 0.25,color="black",lwd=0.25) + 
+            stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.25,color="black",lwd=0.25)+
+            geom_point(size=1.5,pch=21,lwd=0.5)+
+         facet_grid(Gene~Cell,scale="free")+
+              ylab("Normalized expression")+
+              xlab("Group")+
+          scale_fill_manual(values=c("WT.4w"=brewer.pal(5,"Greys")[3],
+                                     "Flt3.2w"=brewer.pal(5,"Reds")[1],
+                                      "Flt3.4w"=brewer.pal(5,"Reds")[2],
+                                      "Flt3.6w"=brewer.pal(5,"Reds")[3],
+                                      "Flt3.8w"=brewer.pal(5,"Reds")[5]),"Group")+
+               guides(fill="none")+
+          theme_classic(base_size=8)+
+              geom_hline(aes(yintercept=-Inf)) + 
+              geom_vline(aes(xintercept=-Inf)) + 
+              coord_cartesian(clip="off")+
+         #     coord_flip()+
+        #      scale_x_discrete(limits=rev(c("WT.4w","Flt3.2w","Flt3.4w","Flt3.6w","Flt3.8w")))+
+              theme(strip.text.y=element_text(angle=0),
+                    strip.background = element_blank(),
+                    axis.title.x = element_blank(),
+                    axis.text.x=element_text(angle=30,hjust=1,vjust=1))
+
+
+genes_of_interest<- c("Socs2","Pim2","Spp1","Mcl1","Bcl2")
+
+ggSTAT_FTime<-ggplot(long_counts_FTime%>%
+          filter(Gene%in%genes_of_interest)%>%
+          filter(Cell=="LSK")%>%
+          mutate(Gene=factor(Gene,levels=genes_of_interest)),
+          aes(x=factor(interaction(Genotype,Timepoint),
+                       levels=c("WT.4w","Flt3.2w","Flt3.4w","Flt3.6w","Flt3.8w")),
+             fill=factor(interaction(Genotype,Timepoint),
+                       levels=c("WT.4w","Flt3.2w","Flt3.4w","Flt3.6w","Flt3.8w")),
+            y=value))+
+            stat_summary(fun= median, geom = "crossbar", width = 0.25,color="black",lwd=0.25) + 
+            stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.25,color="black",lwd=0.25)+
+            geom_point(size=1.5,pch=21,lwd=0.5)+
+         facet_grid(Gene~Cell,scale="free")+
+              ylab("Normalized expression")+
+              xlab("Group")+
+          scale_fill_manual(values=c("WT.4w"=brewer.pal(5,"Greys")[3],
+                                     "Flt3.2w"=brewer.pal(5,"Reds")[1],
+                                      "Flt3.4w"=brewer.pal(5,"Reds")[2],
+                                      "Flt3.6w"=brewer.pal(5,"Reds")[3],
+                                      "Flt3.8w"=brewer.pal(5,"Reds")[5]),"Group")+
+               guides(fill="none")+
+          theme_classic(base_size=8)+
+              geom_hline(aes(yintercept=-Inf)) + 
+              geom_vline(aes(xintercept=-Inf)) + 
+              coord_cartesian(clip="off")+
+        #      coord_flip()+
+         #     scale_x_discrete(limits=rev(c("WT.4w","Flt3.2w","Flt3.4w","Flt3.6w","Flt3.8w")))+
+              theme(strip.text.y=element_text(angle=0),
+                    strip.background = element_blank(),
+                    axis.title.x = element_blank(),
+                    axis.text.x=element_text(angle=30,hjust=1,vjust=1))
+
+
+ggsave(
+  plot_grid(ggSTAT_FTime,ggstem_FTime,ncol=1)
+  ,width=2.5,height=6,
+  file="./Mature_analysis/Final_Figures/Extended Data 2/ExData_2df.pdf")
+
+```
+
+Extended Data 2 E
+```{r}
+
+Inflammation<- c("C3ar1","Ccl17","Ccl2","Ccl22","Ccl5","Cd40","Ciita",
+                        "Csf2rb2","Cxcl10","Cxcl2","Fas","H2-DMa","H2-Eb1","Ido1",
+                      "Irf4","Irf5","Irf7","Irf8","Irf9","Kynu","Mx1","Myd88",
+                      "Nfkbia","Nfkbie","Nr4a1","Rel","Relb","Tnf","Stat1","Stat2")
+
+long_counts_FTime%>%
+  dplyr::filter(Gene%in%c(Inflammation))%>%
+  dplyr::mutate(gene_set=ifelse(Gene%in%MAPK,"MAPK",
+                         ifelse(Gene%in%Inflammation,"Inflammation", "Other")))%>%
+  dplyr::mutate(Cell=factor(Cell,levels=c("LSK","GMP")))%>%
+  dplyr::arrange(Cell,desc(Genotype),gene_set, Timepoint)%>%
+  dplyr::mutate(value=scale(log2(value+0.1)))%>%
+  tidy_heatmap(rows=Gene,
+               columns = Sample,
+               values = value,
+               scale= "row",
+               annotation_col =c(Cell,Genotype,Timepoint),
+               cluster_rows=T,
+               colors = rev(brewer.rdbu(n=100)),
+               color_legend_n=100,
+              # gaps_row = gene_set,
+               treeheight_row = 0,
+               cellwidth = 4,
+               cellheight = 6,
+               show_colnames = FALSE,
+               annotation_colors = list("Genotype"=c("WT"="grey70",
+                                                     "Flt3"=brewer.pal(n=5,"Reds")[5]),
+                                        "Cell"=c("LSK"=brewer.pal(n=5,"Purples")[5],
+                                                 "GMP"=brewer.pal(n=5,"Oranges")[5]),
+                                          "Timepoint"=c("Control"=brewer.pal(n=5,"Greys")[1],
+                                                      "2w"=brewer.pal(n=5,"Greys")[2],
+                                                      "4w"=brewer.pal(n=5,"Greys")[3],
+                                                      "6w"=brewer.pal(n=5,"Greys")[4],
+                                                      "8w"=brewer.pal(n=5,"Greys")[5])) ,
+               file="./Mature_analysis/Final_Figures/Extended Data 2/ExData_2e-heatmap.pdf")
+
+```
+

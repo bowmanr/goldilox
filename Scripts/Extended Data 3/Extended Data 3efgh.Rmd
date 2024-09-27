@@ -1,0 +1,284 @@
+---
+title: "Clonal Evolution Extended Data 3"
+author: "Robert Bowman"
+date: "5/12/2022"
+output: html_document
+---
+ 
+Setup and Packages
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Volumes/LevineLab/Levine Lab/Bobby/Project Notes/Flt3/")
+```
+
+Data Sets
+```{r, message=FALSE}
+library(tidyverse)
+library(cowplot)
+library(RColorBrewer)
+library(pals)
+setwd("/Volumes/LevineLab/Levine Lab/Bobby/Project Notes/Flt3/")
+source("./Scripts/extra_functions.R")
+results_Leuk<-readRDS(file="./Results/2022/February/Flt3_Npm1_3DE_STAR_results.rds")
+pheno_select_leuk<-readRDS(file="./Results/2022/February/Flt3_NPM1_3DE_STAR_pheno.rds")
+norm_counts_leuk<-readRDS(file="./Results/2022/February/Flt3_NPM1_3DE_STAR_norm_counts.rds")
+long_counts_leuk<-readRDS(file="./Results/2022/February/Flt3_NPM1_3DE_STAR_long_counts.rds")
+vsd_transformation_leuk<-readRDS(file="./Results/2022/February/Flt3_NPM1_3DE_STAR_vsd.rds")
+
+results_FTime<-readRDS(file="./Results/2022/February/Flt3_3DE_STAR_results.rds")
+pheno_FTime<-readRDS(file="./Results/2022/February/Flt3_3DE_STAR_pheno.rds")
+norm_counts_FTime<-readRDS(file="./Results/2022/February/Flt3_3DE_STAR_norm_counts.rds")
+long_counts_FTime<-readRDS(file="./Results/2022/February/Flt3_3DE_STAR_long_counts.rds")
+vsd_transformation_FTime<-readRDS(file="./Results/2022/February/Flt3_3DE_STAR_vsd.rds")
+```
+
+
+Extended Data 3e
+```{r}
+PCA<-plotPCA(vsd_transformation_leuk,
+                            intgroup="Sample",
+                            ntop=5000,
+                            return=TRUE)
+
+ggPCA<-ggplot(PCA%>%
+                inner_join(pheno_select_leuk%>%dplyr::select(Sample,Cell,Genotype),by=c("name"="Sample")),
+               aes(x=PC1,y=PC2,color=Genotype,shape=Cell))+
+  geom_point(size=3)+
+  theme_minimal(base_size = 8)+
+  theme(axis.line.x = element_line(),
+        axis.line.y = element_line())+
+  scale_color_manual(values=c(pals::kelly()[-1]))
+
+ggsave(addSmallLegend(ggPCA,textSize = 8),
+      width=3,
+      height=2.25,
+  file="./Mature_analysis/Final_Figures/Extended Data 3/ExData_3e-PCA.pdf")
+```
+
+Extended Data 3f
+```{r gene set ID}
+Leuk_complete<-data.frame("Genes"=rownames(results_Leuk[["Flt3_Npm1_LSK"]][["Flt3_Npm1_VS_Flt3"]]) ,
+                          "LSK_FN_F"=data.frame(results_Leuk[["Flt3_Npm1_LSK"]][["Flt3_Npm1_VS_Flt3"]])%>%
+                                          mutate(score=-log10(padj)*sign(log2FoldChange))%>%
+                                          pull(score),
+                          "LSK_FN_N"=data.frame(results_Leuk[["Flt3_Npm1_LSK"]][["Flt3_Npm1_VS_Npm1"]])%>%
+                                          mutate(score=-log10(padj)*sign(log2FoldChange))%>%
+                                          pull(score),
+                          "LSK_FN_WT"=data.frame(results_Leuk[["Flt3_Npm1_LSK"]][["Flt3_Npm1_VS_WT"]])%>%
+                                          mutate(score=-log10(padj)*sign(log2FoldChange))%>%
+                                          pull(score),
+                         "GMP_FN_F"=data.frame(results_Leuk[["Flt3_Npm1_GMP"]][["Flt3_Npm1_VS_Flt3"]])%>%
+                                          mutate(score=-log10(padj)*sign(log2FoldChange))%>%
+                                          pull(score),
+                         "GMP_FN_N"=data.frame(results_Leuk[["Flt3_Npm1_GMP"]][["Flt3_Npm1_VS_Npm1"]])%>%
+                                          mutate(score=-log10(padj)*sign(log2FoldChange))%>%
+                                          pull(score),
+                         "GMP_FN_WT"=data.frame(results_Leuk[["Flt3_Npm1_GMP"]][["Flt3_Npm1_VS_WT"]])%>%
+                                          mutate(score=-log10(padj)*sign(log2FoldChange))%>%
+                                          pull(score)
+                         )%>%
+                          filter(!is.na(GMP_FN_F))%>%
+                          arrange(GMP_FN_F)
+
+cutoff<- -log10(0.05)
+
+Leuk_sig<-Leuk_complete%>%filter(abs(LSK_FN_F)>cutoff|
+                        abs(LSK_FN_N)>cutoff|
+                        abs(LSK_FN_WT)>cutoff|
+                        abs(GMP_FN_F)>cutoff|
+                        abs(GMP_FN_N)>cutoff|
+                        abs(GMP_FN_WT)>cutoff)
+
+cutoff<- -log10(0.05)
+
+gene_sets<-setNames(data.frame(t(apply(Leuk_complete[,-1],2,function(x){
+                                x<- x[!is.na(x)]
+                                c(sum(as.numeric(x)>cutoff),sum(as.numeric(x)<(cutoff*-1))) })) ,
+                                "Timepoint"=colnames(Leuk_complete)[-1]),
+                     c("Up","Down","Timepoint"))
+
+DEG_barplot<-gene_sets%>%
+      pivot_longer(names_to = "Direction",values_to = "Count",cols = c(Up,Down))%>%
+      mutate(Count=ifelse(Direction=="Down",Count*-1,Count))%>%
+      #mutate(Timepoint=factor(Timepoint,levels=rev(c("2w","4w","6w","8w"))))%>%
+      ggplot(aes(x=Timepoint,y=Count,fill=Direction))+
+      geom_col(width=0.5)+
+      coord_flip()+
+      theme_minimal(base_size=16)+
+      theme(axis.line.x=element_line(),
+            axis.line.y=element_line())+
+      scale_fill_manual(values=c("Up"=brewer.pal(5,"Reds")[5],
+                                 "Down"=brewer.pal(5,"Blues")[5]))
+
+ggsave(DEG_barplot,
+      file="./Mature_analysis/Final_Figures/Extended Data 3/ExData_3f-DEG_barplot.pdf",
+      width=5,
+      height=4)
+```
+
+GSEA Setup
+```{R gene set extraction and setup,cache=TRUE}
+library(msigdbr)
+library(fgsea)
+C2_gene_sets <- msigdbr(species = "Mus musculus", category = "C2")%>%
+                          data.frame%>%
+                          dplyr::select(gene_symbol,gs_name)%>%
+                          split(f = as.factor(.$gs_name))%>%
+                          lapply(function(x){x$gene_symbol})
+H_gene_sets <- msigdbr(species = "Mus musculus", category = "H")%>%
+                          data.frame%>%
+                          dplyr::select(gene_symbol,gs_name)%>%
+                          mutate(gs_name=gsub("HALLMARK_","",gs_name))%>%
+                          split(f = as.factor(.$gs_name))%>%
+                          lapply(function(x){x$gene_symbol})
+```
+
+Extended Data 3g LSK
+```{r}
+LSK_ranked_set<-results_Leuk$Flt3_Npm1_LSK$Flt3_Npm1_VS_Flt3%>%
+                data.frame()%>%
+                filter(baseMean>25)%>%
+                rownames_to_column(var="Gene")%>%
+                arrange(desc(log2FoldChange))
+
+LSK_ranked_set_final <-LSK_ranked_set$log2FoldChange
+names(LSK_ranked_set_final)<-LSK_ranked_set$Gene
+
+LSK_C2_fgseaRes <- fgseaMultilevel(pathways = C2_gene_sets,
+                  stats    = LSK_ranked_set_final,
+                  minSize  = 15,
+                  maxSize  = 1000)
+
+LSK_H_fgseaRes <- fgseaMultilevel(pathways = H_gene_sets,
+                  stats    = LSK_ranked_set_final,
+                  minSize  = 15,
+                  maxSize  = 1000)
+```
+
+Extended Data 3g GMP
+```{r}
+GMP_ranked_set<-results_Leuk$Flt3_Npm1_GMP$Flt3_Npm1_VS_Flt3%>%
+                data.frame()%>%
+                filter(baseMean>25)%>%
+                rownames_to_column(var="Gene")%>%
+                arrange(desc(log2FoldChange))
+
+
+GMP_ranked_set_final <-GMP_ranked_set$log2FoldChange
+names(GMP_ranked_set_final)<-GMP_ranked_set$Gene
+
+GMP_C2_fgseaRes <- fgseaMultilevel(pathways = C2_gene_sets,
+                  stats    = GMP_ranked_set_final,
+                  minSize  = 15,
+                  maxSize  = 1000)
+
+GMP_H_fgseaRes <- fgseaMultilevel(pathways = H_gene_sets,
+                  stats    = GMP_ranked_set_final,
+                  minSize  = 15,
+                  maxSize  = 1000)
+
+
+```
+
+```{r}
+GMP_C2_fgseaRes%>%
+        data.frame()%>%
+        filter(grepl("WIERENGA_STAT5A_TARGETS_UP|KEGG_MAPK_SIGNALING_PATHWAY",pathway))%>%
+        arrange(desc(abs(NES)))%>%
+        dplyr::select(pathway,NES,padj)
+
+LSK_C2_fgseaRes%>%
+        data.frame()%>%
+        filter(grepl("WIERENGA_STAT5A_TARGETS_UP|KEGG_MAPK_SIGNALING_PATHWAY",pathway))%>%
+        arrange(desc(abs(NES)))%>%
+        dplyr::select(pathway,NES,padj)
+```
+
+```{r}
+LSK_H_fgseaRes%>%
+        data.frame()%>%
+      #  filter(grepl("WIERENGA_STAT5A_TARGETS_UP|KEGG_MAPK_SIGNALING_PATHWAY",pathway))%>%
+        arrange(desc((NES)))%>%
+        dplyr::select(pathway,NES,padj)%>%
+    inner_join(GMP_H_fgseaRes%>%dplyr::select(pathway,NES,padj),by="pathway")
+
+
+results_Leuk$Flt3_Npm1_GMP$Flt3_Npm1_VS_Flt3%>%data.frame%>%
+  rownames_to_column(var="Gene")%>%
+  filter(Gene%in%c("Hoxa9","Hoxa10","Hoxa7","Flt3"))
+```
+
+GSEA plot STAT5
+```{r}
+STAT5<-multi_sample_enrichment_plot(pathway_of_interest = H_gene_sets$IL2_STAT5_SIGNALING,
+                              sample_list=list("LSK"=LSK_ranked_set_final,
+                                               "GMP"=GMP_ranked_set_final))
+STAT5_plot<-do.call(rbind,lapply(names(STAT5),function(x){
+                        data.frame(STAT5[[x]]$toPlot,
+                                   "Sample"=x)
+                                   }))%>%
+                          ggplot(aes(x = x, y = y,color=Sample,group=Sample)) +
+                                            geom_point( size = 0.1) + 
+                                             geom_hline(yintercept = 0,  colour = "black") + 
+                                             geom_line() + 
+                                            geom_ribbon(aes(x = x, ymin = 0, 
+                                                            ymax = y, 
+                                                            fill = Sample), alpha = 0.25)+
+                                             theme_bw(base_size = 10) +
+                                            scale_color_manual(values=c("LSK"=brewer.pal(n=5,name="Purples")[5],
+                                                                    "GMP"=brewer.pal(n=5,name="Oranges")[5]))+
+                                            scale_fill_manual(values=c("LSK"=brewer.pal(n=5,name="Purples")[5],
+                                                                   "GMP"=brewer.pal(n=5,name="Oranges")[5]))+
+                                            ggtitle("IL2_STAT5_SIGNALING")+    
+                                              guides(fill="none",alpha="none")+
+                                            theme(panel.border = element_blank(), 
+                                                  legend.title = element_blank(),
+                                                   panel.grid.minor = element_blank(),
+                                                   plot.title = element_text(hjust=0.5)) + 
+                                             labs(x = "rank", 
+                                                  y = "enrichment score")
+
+
+
+```
+
+GSEA plot MAPK
+```{r}
+MAPK<-multi_sample_enrichment_plot(pathway_of_interest = C2_gene_sets$KEGG_MAPK_SIGNALING_PATHWAY,
+                              sample_list=list("LSK"=LSK_ranked_set_final,
+                                               "GMP"=GMP_ranked_set_final))
+MAPK_plot<-do.call(rbind,lapply(names(MAPK),function(x){
+                        data.frame(MAPK[[x]]$toPlot,
+                                   "Sample"=x)
+                                   }))%>%
+                          ggplot(aes(x = x, y = y,color=Sample,group=Sample)) +
+                                            geom_point( size = 0.1) + 
+                                             geom_hline(yintercept = 0,  colour = "black") + 
+                                             geom_line() + 
+                                            geom_ribbon(aes(x = x, ymin = 0, 
+                                                            ymax = y, 
+                                                            fill = Sample), alpha = 0.25)+
+                                             theme_bw(base_size = 10) +
+                                            scale_color_manual(values=c("LSK"=brewer.pal(n=5,name="Purples")[5],
+                                                                    "GMP"=brewer.pal(n=5,name="Oranges")[5]))+
+                                            scale_fill_manual(values=c("LSK"=brewer.pal(n=5,name="Purples")[5],
+                                                                   "GMP"=brewer.pal(n=5,name="Oranges")[5]))+
+                                            ggtitle("KEGG_MAPK_SIGNALING_PATHWAY")+    
+                                              guides(fill="none",alpha="none")+
+                                            theme(panel.border = element_blank(), 
+                                                  legend.title = element_blank(),
+                                                   panel.grid.minor = element_blank(),
+                                                   plot.title = element_text(hjust=0.5)) + 
+                                             labs(x = "rank", 
+                                                  y = "enrichment score")
+
+```
+
+
+GSEA plots
+```{r}
+ggsave(plot_grid(STAT5_plot,MAPK_plot,ncol=1),
+      file="./Mature_analysis/Final_Figures/Extended Data 3/ExData_3g-stacked GSEA.pdf",
+      width=4,
+      height=4)
+```

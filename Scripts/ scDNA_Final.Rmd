@@ -1,0 +1,439 @@
+---
+title: "Clone selection and sample refining"
+author: "Bowman RL"
+date: "1/12/2021"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/bowmanr/Projects/Flt3/")
+```
+
+
+```{r}
+library(tidyverse)
+all_files<- list.files("./Data/scDNA/Processed/")
+
+summary_files<- grep("final_sample_summary_with_p",all_files,value=TRUE)
+summary_files<- grep("BB",summary_files,value=TRUE)
+sample_names<- do.call(rbind,strsplit(summary_files,split="-"))[,1]
+names(summary_files)<-sample_names
+
+cohort_clones<- setNames(lapply(sample_names,function(sample){
+  readRDS(paste0("./Data/scDNA/Processed/",summary_files[sample]))
+}),sample_names)
+
+names(cohort_clones)
+```
+```{r}
+clonograph_BB_2101b<-scDNA::clonograph(cohort_clones[["BB_2101b"]],complete_only = TRUE)
+
+ggsave(BB_2101b,
+       file="./")
+```
+
+```{r}
+clones_to_keep<- list("BB_2101b"=c("1_1_1","1_0_1","0_0_0"),
+                      "BB_3298a"=c("1_1_0_0_0_0","1_1_1_0_0_0","1_1_0_1_0_0","1_1_0_0_1_0","1_1_0_0_0_1","0_0_0_0_0_0"),
+                      "BB_4926"=c("1_1","1_0","0_0"),
+                      "BB_6258a"=c("0_1_0_0_0","0_0_0_1_0","1_0_1_0_0","1_1_0_0_0","0_0_1_0_0","1_0_0_1_0","1_0_0_0_1","0_0_0_0_0"),
+                      "BB_6984a"=c("1_1_0_0_0_0","1_1_1_0_0_0","1_1_0_1_0_0","1_1_0_0_1_0","1_1_0_0_0_1","0_0_0_0_0_0"))
+
+all_clones<-do.call(rbind,lapply(names(cohort_clones),function(x){
+  data.frame(cohort_clones[[x]]$Architecture,
+             "Sample"=x)}))
+
+output<-list()
+for(sample in names(clones_to_keep)){
+  output[[sample]]<-all_clones%>%
+                        dplyr::filter(Sample%in%sample&Clone%in%clones_to_keep[[sample]])
+}
+final_clone_mat<-do.call(rbind,output)
+  
+filtered_clone_Mut_mat_BB<-do.call(rbind,output)%>%
+                    dplyr::filter(grepl("BB",Sample))%>%
+                    dplyr::filter(Genotype!="WT")%>%
+                    group_by(Sample,Clone)%>%
+                    summarise(Clone_Group=case_when(
+                       any(grepl("DNMT3A",AA))&all(!grepl("NPM1|FLT3",AA))~"DNMT3A",
+                       any(grepl("DNMT3A",AA))&any(grepl("NPM1",AA))&all(!grepl("FLT3",AA))~"DNMT3A_NPM1",
+                       any(grepl("DNMT3A",AA))&any(grepl("NPM1",AA))&any(grepl("FLT3",AA))~"DNMT3A_NPM1_FLT3",
+                       
+                       any(!grepl("DNMT3A",AA))&any(grepl("NPM1",AA))&all(!grepl("FLT3",AA))~"NPM1",
+                       any(!grepl("DNMT3A",AA))&any(grepl("NPM1",AA))&any(grepl("FLT3",AA))~"NPM1_FLT3",
+                       any(grepl("DNMT3A",AA))&any(!grepl("NPM1",AA))&any(grepl("FLT3",AA))~"DNMT3A_FLT3",
+                       any(!grepl("DNMT3A",AA))&any(!grepl("NPM1",AA))&any(grepl("FLT3",AA))~"FLT3",
+                       
+                      all(Genotype=="WT")~"WT",
+                      TRUE~"Other"
+                    ))
+
+filtered_clone_mat_BB <-do.call(rbind,output)%>%
+                      dplyr::filter(grepl("BB",Sample))%>%
+                    group_by(Sample,Clone)%>%
+                    dplyr::filter(all(Genotype=="WT"))%>%
+                    summarise(Clone_Group=case_when(
+                        all(Genotype=="WT")~"WT",
+                      TRUE~"Other"
+                    ))%>%
+                rbind(filtered_clone_Mut_mat_BB)%>%
+                mutate("Clone_ID"=paste0(Sample,".",Clone))%>%
+                data.frame()
+
+
+filtered_clone_mat <- filtered_clone_mat_BB
+
+cell_metadata<-do.call(rbind,lapply(names(cohort_clones),function(sample){
+        cohort_clones[[sample]]$NGT%>%
+        dplyr::select(Cell,Clone)%>%
+        mutate("Sample"=sample)%>%
+        mutate("Cell_ID"=paste0(Sample,".",Cell))%>%
+        mutate("Clone_ID"=paste0(Sample,".",Clone))
+}))
+
+
+
+final_metadata<-inner_join(cell_metadata,filtered_clone_mat)
+
+with(final_metadata,table(Sample,Clone_Group))
+```
+
+# Sample aggregation and CLR normalization via Seurat
+```{r}
+proteins_BB <-colnames(cohort_clones$BB_2101b$Protein)
+
+sample_names<- sample_names[grepl("BB",sample_names)]
+extracted_protein<-setNames(lapply(sample_names,function(sample){
+            data.frame(cohort_clones[[sample]]$Protein[cohort_clones[[sample]]$NGT$Cell,proteins_BB],
+                       "Group"=cohort_clones[[sample]]$NGT$Group,
+                       "Sample"=sample)
+}),sample_names)
+
+complete_mat<-do.call(rbind, extracted_protein)%>%
+                      dplyr::filter(Group=="Complete")%>%
+                      filter(grepl("BB",Sample))
+
+final_cells <-intersect(final_metadata$Cell_ID,rownames(complete_mat))
+
+complete_mat<-complete_mat[final_cells,]
+rownames(final_metadata)<-final_metadata$Cell_ID
+final_metadata<-final_metadata[final_cells,]
+```
+
+```{r}
+library(Seurat)
+
+subset_of_cells <- complete_mat%>%
+                     dplyr::filter(CD45>16)%>%
+                     dplyr::filter(Sample!="BB_6258a")%>%
+                      rownames()
+
+sum(is.na(complete_mat))
+
+
+s <- CreateSeuratObject(counts=t(complete_mat[subset_of_cells,proteins_BB[-1]]), 
+                        assay="Protein")
+s <- AddMetaData(object = s,
+                 metadata = list("Sample"=final_metadata%>%
+                                               dplyr::filter(Cell_ID%in%subset_of_cells)%>%
+                                               pull("Sample"),
+                                 "Clone_Group"=final_metadata%>%
+                                               dplyr::filter(Cell_ID%in%subset_of_cells)%>%
+                                               pull("Clone_Group")
+                                 ))
+with(s@meta.data, table(Clone_Group,Sample))
+
+s <- NormalizeData(s,  normalization.method = "LogNormalize")
+s <- ScaleData(s,do.scale=T,do.center=T,split.by="Sample")
+
+s <- FindVariableFeatures(s, selection.method = "vst", nfeatures = 42)
+s <- RunPCA(s,approx=FALSE)
+
+ElbowPlot(s, ndims = 30)
+Idents(object=s)<-"Sample"
+DimPlot(s,reduction="pca")
+```
+
+```{r}
+
+# cluster and run umap (based directly on dsb normalized values without isotype controls)
+proteins_of_interest <- rownames(s@assays$Protein@data)[!grepl("IgG",rownames(s@assays$Protein@data))]
+s <- FindNeighbors(object=s, 
+                   dims=1:4,
+                   reduction="pca",
+                   assay='Protein', 
+                   features=proteins_of_interest,
+                   k.param=100
+                )
+
+# direct graph clustering 
+s <- FindClusters(object=s, 
+                  random.seed=68864,
+                  resolution=0.25,
+                  graph.name='Protein_snn')
+
+s <- RunUMAP(object=s, 
+            reduction="pca",
+            dims=1:4,
+            assay="Protein",
+            seed.use=68864,
+            min.dist=0.01, 
+            n.neighbors=50)
+
+Idents(object = s) <- "Clone_Group"
+Idents(object = s) <- factor(x = Idents(object=s), levels =  (c("WT",
+                                                              "DNMT3A","DNMT3A_FLT3",
+                                                              "DNMT3A_NPM1","DNMT3A_NPM1_FLT3",
+                                                              "NPM1","NPM1_FLT3")))
+
+clone_uMAP<-DimPlot(s,reduction="umap")#,cols=color_palette)
+Idents(object = s) <- "Sample"
+sample_uMAP<-DimPlot(s,reduction="umap")#,cols=kelly(n=11)[2:12])
+
+Idents(object = s) <- "seurat_clusters"
+cluster_uMAP<-DimPlot(s,reduction="umap")#,cols=kelly(n=11)[2:12])
+
+plot_grid(sample_uMAP,clone_uMAP,cluster_uMAP,align="hv",axis="ltrb")
+
+saveRDS(s,file="/Users/bowmanr/Projects/Flt3//Data/scDNA/cohort_analysis.rds")
+```
+
+
+```{r}
+Idents(object = s) <- "seurat_clusters"
+cluster_uMAP<-DimPlot(s,reduction="umap",split.by = "Sample")
+
+```
+
+
+```{r}
+Idents(object = s) <- "seurat_clusters"
+cluster_uMAP<-DimPlot(s,reduction="umap",cols=kelly(n=7)[2:7],raster = TRUE)
+
+CD90_plot<-FeaturePlot(s, features=c("CD90"),raster = TRUE)+
+            colorspace::scale_color_continuous_divergingx(palette = 'RdBu', 
+                                                           mid = 2.5,
+                                                          rev=TRUE,
+                                                          na.value = "grey80")
+
+CD14_plot<-FeaturePlot(s, features=c("CD14"),raster = TRUE)+
+            colorspace::scale_color_continuous_divergingx(palette = 'RdBu', 
+                                                           mid = 2.5,
+                                                          rev=TRUE,
+                                                          na.value = "grey80")
+
+CD45RA_plot<-FeaturePlot(s, features=c("CD45RA"),raster = TRUE)+
+            colorspace::scale_color_continuous_divergingx(palette = 'RdBu', 
+                                                           mid = 2.5,
+                                                          rev=TRUE,
+                                                          na.value = "grey80")
+
+Figure4E<-plot_grid((cluster_uMAP+theme(plot.margin = margin(0.25, 0.25, 0.25, 0.25, "cm"))),
+                    (CD14_plot+theme(plot.margin = margin(0.25, 0.25, 0.25, 0.25, "cm"))),
+                    (CD45RA_plot+theme(plot.margin = margin(0.25, 0.25, 0.25, 0.25, "cm"))),
+                    (CD90_plot+theme(plot.margin =  margin(0.25, 0.25, 0.25, 0.25, "cm"))),
+                    align="hv",axis="ltrb")
+ggsave(Figure4E,file="/Volumes/LevineLab/Levine Lab/Bobby/Project Notes/Flt3/Mature_analysis/Final_Figures/Figure 4/Figure4E-umap.pdf",
+       width=7,height=6)
+```
+
+
+```{r}
+with(s@meta.data,table(seurat_clusters,Sample))%>%data.frame%>%
+      ggplot(aes(x=seurat_clusters,y=Freq,fill=Sample))+geom_col(position="fill")
+```
+
+```{r}
+Idents(object = s) <- "seurat_clusters"
+
+all_markers<-FindAllMarkers(s)
+
+all_markers %>%
+    group_by(cluster) %>%
+    slice(1:4)%>%
+    top_n(n = 8, wt = avg_log2FC) -> top10
+
+DoHeatmap(s,features = c("CD117","CD34",
+                         "FLT3","CD90","CD25",
+                         "CD45RA","CD38","CD71",
+                         "CD14", "CD11b","CD11c","CD64",
+                         "CD2","CD3"),
+            )
+```
+
+
+```{r}
+Idents(object = s) <- "seurat_clusters"
+
+VlnPlot(s,features=c("CD117","CD38","CD34","CD90","CD45RA","CD11b"),
+          pt.size = 0,flip = TRUE,combine = TRUE)#,
+
+```
+
+
+```{r}
+Idents(object = s) <- "seurat_clusters"
+DF<-FindMarkers(s,
+                ident.1="DNMT3A_FLT3",
+                ident.2 = "DNMT3A",
+         #       test.use = "t",
+           #     logfc.threshold = 0.25,
+                group.by = "Clone_Group",
+                subset.ident = c("1"))%>%
+          data.frame()%>%
+          rownames_to_column(var="Marker")
+
+
+DNF<-FindMarkers(s,
+                ident.1="DNMT3A_NPM1_FLT3",
+                ident.2 = "DNMT3A_NPM1",
+            #    test.use = "t",
+            #    logfc.threshold = 0.25,
+                group.by = "Clone_Group",
+                subset.ident = c("1"))%>%
+          data.frame()%>%
+          rownames_to_column(var="Marker")
+
+NF<-FindMarkers(s,
+                ident.1="NPM1_FLT3",
+                ident.2 = "NPM1",
+         #       test.use = "t",
+            #    logfc.threshold = 0.25,
+                group.by = "Clone_Group",
+                subset.ident = c("1"))%>%
+          data.frame()%>%
+          rownames_to_column(var="Marker")
+
+diff_out<-inner_join(
+      inner_join(DF%>%
+              dplyr::select(Marker,
+                            DF_padj=p_val_adj,
+                            DF_FC=avg_log2FC)%>%
+                mutate(DF_score=-log10(DF_padj)*sign(DF_FC)),
+                 DNF%>%
+                    dplyr::select(Marker,
+                                  DNF_padj=p_val_adj,
+                                  DNF_FC=avg_log2FC))%>%
+                mutate(DNF_score=-log10(DNF_padj)*sign(DNF_FC)),
+                NF%>%
+                    dplyr::select(Marker,
+                                  NF_padj=p_val_adj,
+                                  NF_FC=avg_log2FC)%>%
+                mutate(NF_score=-log10(NF_padj)*sign(NF_FC)))%>%
+        dplyr::select(Marker,NF_score,DNF_score,DF_score)%>%
+        pivot_longer(cols=-Marker,names_to = "Group",values_to ="score" )
+
+
+diff_out%>%ggplot(aes(x=score,y=Marker,fill=Group))+geom_col(position = position_dodge())
+```
+
+
+
+```{r}
+Idents(object = s) <- "seurat_clusters"
+
+VlnPlot(s,features=c("CD45RA","CD34","FLT3"),
+          pt.size = 0,
+         flip = T,
+        #  ncol=1,
+         stack=T,
+          group.by="Clone_Group",
+          idents=c("1")
+        )+
+      scale_fill_manual(values=c("DNMT3A"=stepped3()[8],
+                                                  "DNMT3A_FLT3"=stepped3()[5],
+                                                  "NPM1"=stepped()[12],
+                                                  "NPM1_FLT3"=stepped()[9],
+                                                  "DNMT3A_NPM1"=stepped()[20],
+                                                  "DNMT3A_NPM1_FLT3"=stepped()[17]))
+
+```
+
+```{r}
+FeaturePlot(s,
+            features=c("CD90"))+
+            colorspace::scale_color_continuous_divergingx(palette = 'RdBu', 
+                                                           mid = 2.5,
+                                                          rev=TRUE,
+                                                          na.value = "grey80")
+```
+
+
+```{r,eval=FALSE}
+# make results dataframe 
+d = cbind(s@meta.data, as.data.frame(t(data.frame(s@assays$Protein@data))), s@reductions$umap@cell.embeddings)
+#d$Clone_Group<- gsub("_"," ",d$Clone_Group)
+
+
+d%>%
+  filter(seurat_clusters%in%c(1,2,3))%>%
+  filter(grepl("FLT3",Clone_Group))%>%
+  dplyr::select(Clone_Group,seurat_clusters)%>%
+  data.frame()->out
+with(out,  table(seurat_clusters,Clone_Group))%>%data.frame%>%
+      ggplot(aes(x=Clone_Group,y=Freq,fill=seurat_clusters))+
+      geom_col(position="fill")
+
+with(out,  table(Clone_Group,seurat_clusters))%>%
+            data.frame%>%
+    filter(seurat_clusters%in%c(1,2,3,4))
+
+```
+
+```{r}
+ggplot(d%>%
+          dplyr::filter(Clone_Group%in%c(
+                   "DNMT3A_NPM1","DNMT3A_NPM1_FLT3",
+                   "NPM1","NPM1_FLT3")), 
+          aes(x =CD117,y = CD34,color=Clone_Group)) +
+                  theme_minimal(base_size=16) + 
+                  facet_wrap(~Clone_Group)+
+                  geom_density_2d(contour_var = "ndensity",lwd=1)+
+             #     scale_color_manual(values=(stepped()[c(3,1,15,13	)]))+
+        #          geom_hline(yintercept =c(0.5),lty=2)+
+       #         geom_vline(xintercept =c(0.5),lty=2)+
+                   xlim(-0.5,10)+
+                  ylim(-0.5,10)+
+                  theme(legend.position = "none")
+```
+
+
+
+```{r}
+Idents(object = s)<- c("Clone_Group")
+
+DotPlot(s,features=c("CD3","CD19",
+                     "CD117","CD34",
+                     "CD38","CD45RA",
+                     "CD33","CD11b","CD11c",
+                     "CD14","CD16","CD64"),
+                         idents=rev(c("WT",
+                                      "DNMT3A_NPM1",
+                                      "DNMT3A",
+                                      "DNMT3A_FLT3",
+                                      "DNMT3A_NPM1_FLT3",
+                                      "NPM1",
+                                      "NPM1_FLT3"
+                                  )) ,
+          cluster.idents=FALSE,dot.min=0.2,scale.by = "size")+ 
+          RotatedAxis()+            
+          colorspace::scale_color_continuous_divergingx(palette='RdBu', mid = 0,
+                                                        rev=TRUE,na.value = "grey80")+
+          scale_y_discrete(limits=rev(c("WT",
+                                     "DNMT3A",
+                                     "DNMT3A_FLT3",
+                                     "NPM1",
+                                      "NPM1_FLT3",
+                                      "DNMT3A_NPM1",
+                                      "DNMT3A_NPM1_FLT3"
+                                     )))##+
+          scale_size_manual(limits=c(0,100))
+       #   scale_x_discrete(limits=rev(c("CD3","CD19",
+        #                                )))
+          
+
+table(s@meta.data$Clone_Group,s$Sample)
+```
+``
